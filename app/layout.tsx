@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
-import Navbar from "./Components/Navbar";
-import SmoothScroll from "./Components/SmoothScroll";
 
 const ibmPlexSans = IBM_Plex_Sans({
   variable: "--font-ibm-plex-sans",
@@ -23,11 +21,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="scroll-smooth">
-      <body className={`${ibmPlexSans.variable} antialiased`}>
-        <SmoothScroll />
-        <Navbar />
-        {children}
-      </body>
+      <body className={`${ibmPlexSans.variable} antialiased`}>{children}</body>
     </html>
   );
 }

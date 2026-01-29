@@ -29,7 +29,8 @@ export default function Hero() {
           {/* CTA Buttons */}
           <div className="flex flex-wrap gap-4">
             <a
-              href="#start"
+              href="/app/borrow"
+              target="_blank"
               className="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-8 py-4 rounded-full font-semibold text-lg transition-all duration-300 shadow-lg hover:shadow-xl"
             >
               Start Borrowing

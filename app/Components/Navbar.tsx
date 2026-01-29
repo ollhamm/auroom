@@ -40,7 +40,7 @@ export default function Navbar() {
           {/* Logo */}
           <div className="flex-shrink-0">
             <a href="#" className="text-2xl font-bold text-primary">
-              <Image src="/images/logo.png" alt="Logo" width={64} height={64} />
+              <Image src="/images/Aur.png" alt="Logo" width={64} height={64} />
             </a>
           </div>
 
@@ -61,6 +61,7 @@ export default function Navbar() {
           <div className="hidden md:flex items-center">
             <a
               href="/app"
+              target="_blank"
               className="bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-full font-semibold text-sm transition-all duration-300 shadow-lg hover:shadow-xl"
             >
               Launch App
