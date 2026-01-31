@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ClipboardClock,
   DollarSign,
+  Droplets,
   Home,
   Hourglass,
   PanelBottomClose,
@@ -44,6 +45,11 @@ export default function Sidebar() {
       name: "Transactions",
       icon: <ClipboardClock className="w-5 h-5" />,
       href: "/app/transactions",
+    },
+    {
+      name: "Faucet",
+      icon: <Droplets className="w-5 h-5" />,
+      href: "/app/faucet",
     },
   ];
 

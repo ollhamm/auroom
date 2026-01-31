@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Sans } from "next/font/google";
 import "./globals.css";
+import { Web3Provider } from "./providers/Web3Provider";
+import { ToastProvider } from "./providers/ToastProvider";
 
 const ibmPlexSans = IBM_Plex_Sans({
   variable: "--font-ibm-plex-sans",
@@ -21,7 +23,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="scroll-smooth">
-      <body className={`${ibmPlexSans.variable} antialiased`}>{children}</body>
+      <body className={`${ibmPlexSans.variable} antialiased`}>
+        <Web3Provider>
+          <ToastProvider>{children}</ToastProvider>
+        </Web3Provider>
+      </body>
     </html>
   );
 }
+

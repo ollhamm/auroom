@@ -1,92 +1,116 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useAccount } from "wagmi";
+import Link from "next/link";
 import {
   Coins,
   TrendingDown,
   Info,
   AlertTriangle,
   ArrowRight,
-  CheckCircle,
+  CheckCircle as CheckCircleIcon,
+  Loader2,
 } from "lucide-react";
+import {
+  usePosition,
+  useXautPrice,
+  useTotalDebt,
+  useWithdraw,
+} from "@/app/hooks/useProtocol";
+import {
+  formatXaut,
+  formatIdrx,
+  formatPriceRaw,
+  calculateWithdrawableCollateral,
+} from "@/app/lib/format";
+import { PROTOCOL_CONFIG, CHAIN_CONFIG } from "@/app/contracts";
 
 export default function WithdrawPage() {
-  // Mock data - akan diganti dengan real blockchain data
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const collateralAmount: number = 1.5; // XAUT deposited
-  const xautPrice: number = 2000; // XAUT price in USD
-  const currentBorrowed = 15000000; // 15M IDRX borrowed
-  const accruedInterest = 750000; // 750K IDRX interest
-  const totalDebt = currentBorrowed + accruedInterest; // 15.75M IDRX
-  const userTier = 1; // 1 = 50%, 2 = 60%, 3 = 70%
-  const liquidationThreshold = 80; // 80%
+  const { address, isConnected } = useAccount();
 
-  // Calculate max withdrawable amount
-  const calculateMaxWithdraw = () => {
-    if (collateralAmount <= 0) return 0;
-    if (totalDebt === 0) return collateralAmount; // Can withdraw all if no debt
+  // Read data
+  const { data: position, refetch: refetchPosition } = usePosition(address);
+  const { data: price } = useXautPrice();
+  const { data: totalDebtData, refetch: refetchDebt } = useTotalDebt(address);
 
-    const maxLTVPercent = userTier === 1 ? 50 : userTier === 2 ? 60 : 70;
-    const debtValueUSD = totalDebt / 15384;
-    const minCollateralUSD = debtValueUSD / (maxLTVPercent / 100);
-    const minCollateralXAUT = minCollateralUSD / xautPrice;
+  // Write operations
+  const {
+    withdraw,
+    isPending: withdrawing,
+    isConfirming: withdrawConfirming,
+    isSuccess: withdrawn,
+    hash: withdrawHash,
+    reset: resetWithdraw,
+  } = useWithdraw();
 
-    const maxWithdrawXAUT = collateralAmount - minCollateralXAUT;
-    return Math.max(0, maxWithdrawXAUT);
+  // Derived values
+  const collateralAmount = position?.collateralAmount || 0n;
+  const totalDebt = totalDebtData || 0n;
+  const priceUsd = price ? formatPriceRaw(price) : 0;
+  const maxWithdrawable = price
+    ? calculateWithdrawableCollateral(collateralAmount, totalDebt, price)
+    : 0n;
+
+  const withdrawValue = BigInt(Math.floor(Number(withdrawAmount || 0) * 1e18)); // XAUT has 18 decimals
+  const newCollateral = collateralAmount > withdrawValue ? collateralAmount - withdrawValue : 0n;
+
+  // Calculate new LTV after withdrawal
+  const calculateNewLTV = () => {
+    if (totalDebt === 0n || !price) return 0;
+    if (newCollateral === 0n) return Infinity;
+    const collateralValueUsd = Number(formatXaut(newCollateral)) * priceUsd;
+    const debtValueUsd = Number(formatIdrx(totalDebt)) / 16000;
+    if (collateralValueUsd === 0) return Infinity;
+    return (debtValueUsd / collateralValueUsd) * 100;
   };
 
-  // Calculate LTV after withdrawal
-  const calculateLTV = (withdrawValue: number) => {
-    if (totalDebt === 0) return 0;
-    const remainingCollateral = collateralAmount - withdrawValue;
-    if (remainingCollateral <= 0) return Infinity;
-
-    const debtValueUSD = totalDebt / 15384;
-    const collateralValueUSD = remainingCollateral * xautPrice;
-    return (debtValueUSD / collateralValueUSD) * 100;
+  const currentLTV = () => {
+    if (totalDebt === 0n || !price) return 0;
+    const collateralValueUsd = Number(formatXaut(collateralAmount)) * priceUsd;
+    const debtValueUsd = Number(formatIdrx(totalDebt)) / 16000;
+    if (collateralValueUsd === 0) return 0;
+    return (debtValueUsd / collateralValueUsd) * 100;
   };
 
-  // Calculate health factor after withdrawal
-  const calculateHealthFactor = (withdrawValue: number) => {
-    const currentLTV = calculateLTV(withdrawValue);
-    if (currentLTV === 0) return Infinity;
-    if (currentLTV === Infinity) return 0;
-    return liquidationThreshold / currentLTV;
-  };
+  const newLTV = calculateNewLTV();
+  const oldLTV = currentLTV();
+  const maxLTVPercent = PROTOCOL_CONFIG.LTV_BPS / 100;
+  const liquidationThreshold = PROTOCOL_CONFIG.LIQUIDATION_THRESHOLD_BPS / 100;
 
-  const maxWithdrawable = calculateMaxWithdraw();
-  const withdrawValue = parseFloat(withdrawAmount) || 0;
-  const newLTV = calculateLTV(withdrawValue);
-  const healthFactor = calculateHealthFactor(withdrawValue);
-  const maxLTVPercent = userTier === 1 ? 50 : userTier === 2 ? 60 : 70;
-  const currentLTV =
-    totalDebt === 0
-      ? 0
-      : (totalDebt / 15384 / (collateralAmount * xautPrice)) * 100;
+  const newHealthFactor = newLTV > 0 && newLTV !== Infinity ? liquidationThreshold / newLTV : Infinity;
+  const isNearMaxLTV = newLTV > maxLTVPercent * 0.9 && newLTV !== Infinity;
+  const isExceedingMaxLTV = newLTV > maxLTVPercent || newLTV === Infinity;
+
+  const canWithdraw =
+    isConnected &&
+    Number(withdrawAmount) > 0 &&
+    withdrawValue <= maxWithdrawable &&
+    collateralAmount > 0n;
+
+  // Refetch after successful withdrawal
+  useEffect(() => {
+    if (withdrawn) {
+      refetchPosition();
+      refetchDebt();
+      setTimeout(() => {
+        setWithdrawAmount("");
+        resetWithdraw();
+      }, 3000);
+    }
+  }, [withdrawn]);
 
   const handleMaxClick = () => {
-    setWithdrawAmount(maxWithdrawable.toFixed(4));
+    setWithdrawAmount(formatXaut(maxWithdrawable));
   };
 
   const handlePercentageClick = (percentage: number) => {
-    const amount = (maxWithdrawable * percentage) / 100;
+    const amount = (Number(formatXaut(maxWithdrawable)) * percentage) / 100;
     setWithdrawAmount(amount.toFixed(4));
   };
 
-  const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(e.target.value);
-    setWithdrawAmount(value.toFixed(4));
-  };
-
-  const handleWithdraw = () => {
-    // Will connect to smart contract
-    console.log("Withdrawing:", withdrawAmount, "XAUT");
-  };
-
-  const isNearMaxLTV = newLTV > maxLTVPercent * 0.9; // Warning at 90% of max LTV
-  const isExceedingMaxLTV = newLTV > maxLTVPercent;
-  const canWithdraw =
-    withdrawValue > 0 && withdrawValue <= maxWithdrawable && !isExceedingMaxLTV;
+  const isLoading = withdrawing || withdrawConfirming;
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -101,7 +125,19 @@ export default function WithdrawPage() {
       </div>
 
       <div className="bg-gradient-to-b from-bg-main to-white shadow-xl rounded-tl-[4rem] rounded-3xl p-8">
-        {collateralAmount === 0 ? (
+        {!isConnected ? (
+          <div className="text-center py-16">
+            <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <Coins className="w-10 h-10 text-primary" />
+            </div>
+            <h2 className="text-2xl font-bold text-text-primary mb-3">
+              Connect Your Wallet
+            </h2>
+            <p className="text-text-secondary mb-8 max-w-md mx-auto">
+              Please connect your wallet to withdraw collateral.
+            </p>
+          </div>
+        ) : collateralAmount === 0n ? (
           /* No Collateral State */
           <div className="text-center py-16">
             <div className="w-20 h-20 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
@@ -111,12 +147,14 @@ export default function WithdrawPage() {
               No Collateral Available
             </h2>
             <p className="text-text-secondary mb-8 max-w-md mx-auto">
-              You don't have any XAUT deposited. Deposit collateral first to
-              start using the platform.
+              You don't have any XAUT deposited. Deposit collateral first.
             </p>
-            <button className="bg-primary hover:bg-primary/90 text-white px-8 py-4 rounded-full font-semibold transition-all duration-300 shadow-md hover:shadow-xl">
+            <Link
+              href="/app/deposit"
+              className="bg-primary hover:bg-primary/90 text-white px-8 py-4 rounded-full font-semibold transition-all duration-300 shadow-md hover:shadow-xl inline-block"
+            >
               Deposit Collateral
-            </button>
+            </Link>
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -134,13 +172,13 @@ export default function WithdrawPage() {
                       Total Deposited Collateral
                     </span>
                     <span className="text-lg font-bold text-text-primary">
-                      {collateralAmount.toFixed(4)} XAUT
+                      {formatXaut(collateralAmount)} XAUT
                     </span>
                   </div>
                   <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                     <span className="text-xs text-text-secondary">Value</span>
                     <span className="text-sm font-medium text-text-primary">
-                      ≈ ${(collateralAmount * xautPrice).toLocaleString()} USD
+                      ≈ ${(Number(formatXaut(collateralAmount)) * priceUsd).toLocaleString()} USD
                     </span>
                   </div>
                 </div>
@@ -152,38 +190,24 @@ export default function WithdrawPage() {
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-primary">
-                      {maxWithdrawable.toFixed(4)} XAUT
+                      {formatXaut(maxWithdrawable)} XAUT
                     </span>
                   </div>
                 </div>
 
                 {/* Quick Action Buttons */}
-                {totalDebt > 0 && (
+                {totalDebt > 0n && (
                   <div className="grid grid-cols-4 gap-3 mb-6">
-                    <button
-                      onClick={() => handlePercentageClick(25)}
-                      className="px-4 py-3 bg-white hover:bg-primary/10 border-2 border-gray-200 hover:border-primary text-text-primary font-semibold rounded-2xl transition-all"
-                    >
-                      25%
-                    </button>
-                    <button
-                      onClick={() => handlePercentageClick(50)}
-                      className="px-4 py-3 bg-white hover:bg-primary/10 border-2 border-gray-200 hover:border-primary text-text-primary font-semibold rounded-2xl transition-all"
-                    >
-                      50%
-                    </button>
-                    <button
-                      onClick={() => handlePercentageClick(75)}
-                      className="px-4 py-3 bg-white hover:bg-primary/10 border-2 border-gray-200 hover:border-primary text-text-primary font-semibold rounded-2xl transition-all"
-                    >
-                      75%
-                    </button>
-                    <button
-                      onClick={() => handlePercentageClick(100)}
-                      className="px-4 py-3 bg-white hover:bg-primary/10 border-2 border-gray-200 hover:border-primary text-text-primary font-semibold rounded-2xl transition-all"
-                    >
-                      100%
-                    </button>
+                    {[25, 50, 75, 100].map((pct) => (
+                      <button
+                        key={pct}
+                        onClick={() => handlePercentageClick(pct)}
+                        disabled={isLoading}
+                        className="px-4 py-3 bg-white hover:bg-primary/10 border-2 border-gray-200 hover:border-primary text-text-primary font-semibold rounded-2xl transition-all disabled:opacity-50"
+                      >
+                        {pct}%
+                      </button>
+                    ))}
                   </div>
                 )}
 
@@ -196,12 +220,14 @@ export default function WithdrawPage() {
                       onChange={(e) => setWithdrawAmount(e.target.value)}
                       placeholder="0"
                       step="0.0001"
-                      className="w-full text-4xl font-bold text-text-primary bg-white rounded-3xl px-6 py-6 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all"
+                      disabled={isLoading}
+                      className="w-full text-4xl font-bold text-text-primary bg-white rounded-3xl px-6 py-6 focus:outline-none focus:ring-2 focus:ring-primary/50 transition-all disabled:opacity-50"
                     />
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-3">
                       <button
                         onClick={handleMaxClick}
-                        className="px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary font-semibold text-sm rounded-full transition-all"
+                        disabled={isLoading}
+                        className="px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary font-semibold text-sm rounded-full transition-all disabled:opacity-50"
                       >
                         MAX
                       </button>
@@ -214,37 +240,16 @@ export default function WithdrawPage() {
                   </div>
                   <div className="mt-2 px-6">
                     <span className="text-sm text-text-secondary">
-                      ≈ $
-                      {(withdrawValue * xautPrice).toLocaleString(undefined, {
+                      ≈ ${(Number(withdrawAmount || 0) * priceUsd).toLocaleString(undefined, {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
-                      })}{" "}
-                      USD
-                    </span>
-                  </div>
-                </div>
-
-                {/* Slider */}
-                <div className="mb-8">
-                  <input
-                    type="range"
-                    min="0"
-                    max={maxWithdrawable}
-                    step="0.0001"
-                    value={withdrawValue}
-                    onChange={handleSliderChange}
-                    className="w-full h-2 bg-gray-200 rounded-full appearance-none cursor-pointer accent-primary"
-                  />
-                  <div className="flex justify-between mt-2 px-1">
-                    <span className="text-xs text-text-secondary">0</span>
-                    <span className="text-xs text-text-secondary">
-                      {maxWithdrawable.toFixed(4)}
+                      })} USD
                     </span>
                   </div>
                 </div>
 
                 {/* LTV Progress After Withdrawal */}
-                {totalDebt > 0 && (
+                {totalDebt > 0n && (
                   <div className="mb-6">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-medium text-text-primary">
@@ -252,19 +257,18 @@ export default function WithdrawPage() {
                       </span>
                       <div className="flex items-center gap-3">
                         <span className="text-sm text-text-secondary line-through">
-                          {currentLTV.toFixed(1)}%
+                          {oldLTV.toFixed(1)}%
                         </span>
                         <span
                           className={`text-sm font-bold ${
                             isExceedingMaxLTV
                               ? "text-error"
-                              : newLTV > maxLTVPercent * 0.9
+                              : isNearMaxLTV
                                 ? "text-secondary"
                                 : "text-text-primary"
                           }`}
                         >
-                          {newLTV === Infinity ? "∞" : newLTV.toFixed(1)}% /{" "}
-                          {maxLTVPercent}%
+                          {newLTV === Infinity ? "∞" : newLTV.toFixed(1)}%
                         </span>
                       </div>
                     </div>
@@ -284,17 +288,11 @@ export default function WithdrawPage() {
                         }}
                       ></div>
                     </div>
-                    <div className="flex justify-between mt-2">
-                      <span className="text-xs text-text-secondary">Safe</span>
-                      <span className="text-xs text-text-secondary">
-                        Max LTV ({maxLTVPercent}%)
-                      </span>
-                    </div>
                   </div>
                 )}
 
                 {/* Warning if approaching max LTV */}
-                {isNearMaxLTV && withdrawValue > 0 && !isExceedingMaxLTV && (
+                {isNearMaxLTV && Number(withdrawAmount) > 0 && !isExceedingMaxLTV && (
                   <div className="mb-6 p-4 bg-secondary/10 border border-secondary/30 rounded-2xl flex items-start gap-3">
                     <AlertTriangle className="w-5 h-5 text-secondary flex-shrink-0 mt-0.5" />
                     <div>
@@ -302,57 +300,73 @@ export default function WithdrawPage() {
                         Approaching Max LTV
                       </p>
                       <p className="text-xs text-text-secondary">
-                        Your LTV will be {newLTV.toFixed(1)}% after withdrawal.
                         Consider withdrawing less to maintain a safer position.
                       </p>
                     </div>
                   </div>
                 )}
 
-                {/* Error if exceeding max LTV */}
-                {isExceedingMaxLTV && (
-                  <div className="mb-6 p-4 bg-error/10 border border-error/30 rounded-2xl flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-semibold text-error mb-1">
-                        Cannot Withdraw This Amount
-                      </p>
-                      <p className="text-xs text-error/80">
-                        This withdrawal would exceed your maximum LTV of{" "}
-                        {maxLTVPercent}%. Maximum you can withdraw is{" "}
-                        {maxWithdrawable.toFixed(4)} XAUT.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Full Withdrawal Notice (No Debt) */}
-                {totalDebt === 0 && withdrawValue === collateralAmount && (
+                {/* Full Withdrawal Notice */}
+                {totalDebt === 0n && Number(withdrawAmount) > 0 && withdrawValue >= collateralAmount && (
                   <div className="mb-6 p-4 bg-primary/10 border border-primary/30 rounded-2xl flex items-start gap-3">
-                    <CheckCircle className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
+                    <CheckCircleIcon className="w-5 h-5 text-primary flex-shrink-0 mt-0.5" />
                     <div>
                       <p className="text-sm font-semibold text-primary mb-1">
                         Full Collateral Withdrawal
                       </p>
                       <p className="text-xs text-text-secondary">
-                        You're withdrawing all your collateral. You can deposit
-                        again anytime to start borrowing.
+                        You're withdrawing all your collateral.
                       </p>
                     </div>
                   </div>
                 )}
 
+                {/* Transaction Status */}
+                {withdrawHash && (
+                  <div className="mb-4 p-4 bg-blue-50 rounded-2xl">
+                    {withdrawConfirming && (
+                      <div className="flex items-center gap-2 text-blue-700">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Confirming withdrawal...</span>
+                      </div>
+                    )}
+                    {withdrawn && (
+                      <div className="flex items-center gap-2 text-green-700">
+                        <CheckCircleIcon className="w-4 h-4" />
+                        <span>Withdrawal successful!</span>
+                        <a
+                          href={`${CHAIN_CONFIG.blockExplorer}/tx/${withdrawHash}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="underline"
+                        >
+                          View tx
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Action Button */}
                 <button
-                  onClick={handleWithdraw}
-                  disabled={!canWithdraw}
+                  onClick={() => withdraw(withdrawAmount)}
+                  disabled={!canWithdraw || isLoading || withdrawn}
                   className="w-full bg-primary hover:bg-primary/90 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold py-4 rounded-full transition-all duration-300 shadow-md hover:shadow-xl flex items-center justify-center gap-2"
                 >
-                  <ArrowRight className="w-5 h-5" />
-                  Withdraw {withdrawValue > 0
-                    ? withdrawValue.toFixed(4)
-                    : ""}{" "}
-                  XAUT
+                  {isLoading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : withdrawn ? (
+                    <CheckCircleIcon className="w-5 h-5" />
+                  ) : (
+                    <ArrowRight className="w-5 h-5" />
+                  )}
+                  {withdrawing
+                    ? "Withdrawing..."
+                    : withdrawConfirming
+                    ? "Confirming..."
+                    : withdrawn
+                    ? "Withdrawal Complete!"
+                    : `Withdraw ${Number(withdrawAmount) > 0 ? Number(withdrawAmount).toFixed(4) : ""} XAUT`}
                 </button>
               </div>
             </div>
@@ -372,93 +386,67 @@ export default function WithdrawPage() {
                     </span>
                     <div className="flex items-baseline gap-2">
                       <p className="text-2xl font-bold text-text-primary">
-                        {(collateralAmount - withdrawValue).toFixed(4)}
+                        {formatXaut(newCollateral)}
                       </p>
                       <span className="text-sm text-text-secondary">XAUT</span>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs text-text-secondary line-through">
-                        {collateralAmount.toFixed(4)}
-                      </span>
-                      {withdrawValue > 0 && (
-                        <span className="text-xs text-error font-semibold">
-                          -{withdrawValue.toFixed(4)}
-                        </span>
-                      )}
-                    </div>
+                    {Number(withdrawAmount) > 0 && (
+                      <p className="text-xs text-error mt-1">
+                        -{Number(withdrawAmount).toFixed(4)} XAUT
+                      </p>
+                    )}
                   </div>
 
-                  {/* Total Debt (if any) */}
-                  {totalDebt > 0 && (
+                  {/* Total Debt */}
+                  {totalDebt > 0n && (
                     <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-4">
                       <span className="text-xs text-text-secondary uppercase tracking-wide block mb-2">
                         Total Debt
                       </span>
                       <div className="flex items-baseline gap-2">
                         <p className="text-2xl font-bold text-primary">
-                          {totalDebt.toLocaleString()}
+                          {formatIdrx(totalDebt)}
                         </p>
-                        <span className="text-sm text-text-secondary">
-                          IDRX
-                        </span>
+                        <span className="text-sm text-text-secondary">IDRX</span>
                       </div>
-                      <p className="text-xs text-text-secondary mt-1">
-                        Unchanged
-                      </p>
+                      <p className="text-xs text-text-secondary mt-1">Unchanged</p>
                     </div>
                   )}
 
-                  {/* Health Factor After Withdrawal */}
-                  {totalDebt > 0 && (
+                  {/* Health Factor */}
+                  {totalDebt > 0n && (
                     <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-4">
                       <span className="text-xs text-text-secondary uppercase tracking-wide block mb-2">
-                        Health Factor
+                        Health Factor (After)
                       </span>
                       <div className="flex items-baseline gap-2">
                         <p
                           className={`text-2xl font-bold ${
-                            healthFactor === Infinity
+                            newHealthFactor >= 1.5
                               ? "text-primary"
-                              : healthFactor >= 1.5
-                                ? "text-primary"
-                                : healthFactor >= 1.2
-                                  ? "text-secondary"
-                                  : "text-error"
+                              : newHealthFactor >= 1.2
+                                ? "text-secondary"
+                                : "text-error"
                           }`}
                         >
-                          {healthFactor === Infinity
-                            ? "∞"
-                            : healthFactor === 0
-                              ? "0.00"
-                              : healthFactor.toFixed(2)}
+                          {newHealthFactor === Infinity ? "∞" : newHealthFactor.toFixed(2)}
                         </p>
-                        {withdrawValue > 0 && healthFactor < Infinity && (
+                        {Number(withdrawAmount) > 0 && newHealthFactor < Infinity && (
                           <TrendingDown className="w-5 h-5 text-error" />
                         )}
                       </div>
-                      <p className="text-xs text-text-secondary mt-1">
-                        {healthFactor === Infinity
-                          ? "No debt"
-                          : healthFactor >= 1.5
-                            ? "Healthy position"
-                            : healthFactor >= 1.2
-                              ? "Moderate risk"
-                              : "High risk"}
-                      </p>
                     </div>
                   )}
 
-                  {/* Withdrawal Value */}
+                  {/* You Will Receive */}
                   <div className="bg-white/70 backdrop-blur-sm rounded-2xl p-4">
                     <p className="text-xs font-semibold text-text-primary mb-2">
                       You Will Receive
                     </p>
                     <div className="space-y-1 text-xs text-text-secondary">
-                      <p>• {withdrawValue.toFixed(4)} XAUT</p>
-                      <p>
-                        • ≈ ${(withdrawValue * xautPrice).toLocaleString()} USD
-                      </p>
-                      <p>• Direct to your wallet</p>
+                      <p>• {Number(withdrawAmount || 0).toFixed(4)} XAUT</p>
+                      <p>• ≈ ${(Number(withdrawAmount || 0) * priceUsd).toLocaleString()} USD</p>
+                      <p>• Direct to wallet</p>
                     </div>
                   </div>
                 </div>
@@ -468,33 +456,29 @@ export default function WithdrawPage() {
         )}
 
         {/* Bottom Info Section */}
-        {collateralAmount > 0 && (
+        {collateralAmount > 0n && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-8">
             <div className="bg-white/60 rounded-3xl p-6 shadow-md">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
                   <Coins className="w-5 h-5 text-primary" />
                 </div>
-                <h4 className="font-semibold text-text-primary">
-                  Your Gold, Your Control
-                </h4>
+                <h4 className="font-semibold text-text-primary">Your Control</h4>
               </div>
               <p className="text-sm text-text-secondary">
-                Withdraw your XAUT anytime. Your gold remains under your full
-                control and ownership.
+                Withdraw your XAUT anytime. Your gold remains under your full control.
               </p>
             </div>
 
             <div className="bg-white/60 rounded-3xl p-6 shadow-md">
               <div className="flex items-center gap-3 mb-3">
                 <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 text-primary" />
+                  <CheckCircleIcon className="w-5 h-5 text-primary" />
                 </div>
                 <h4 className="font-semibold text-text-primary">Safe Limits</h4>
               </div>
               <p className="text-sm text-text-secondary">
-                The system ensures you maintain a healthy position and prevents
-                withdrawals that would put you at risk.
+                System ensures healthy position and prevents risky withdrawals.
               </p>
             </div>
 
@@ -503,13 +487,10 @@ export default function WithdrawPage() {
                 <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
                   <Info className="w-5 h-5 text-primary" />
                 </div>
-                <h4 className="font-semibold text-text-primary">
-                  Instant Transfer
-                </h4>
+                <h4 className="font-semibold text-text-primary">Instant</h4>
               </div>
               <p className="text-sm text-text-secondary">
-                Withdrawals are processed immediately on-chain. Your XAUT
-                arrives in your wallet instantly.
+                Withdrawals processed immediately on-chain to your wallet.
               </p>
             </div>
           </div>
