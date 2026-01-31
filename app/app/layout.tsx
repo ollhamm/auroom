@@ -1,5 +1,6 @@
 import Sidebar from "../Components/App/Sidebar";
 import NavbarApp from "../Components/App/NavbarApp";
+import NetworkAlert from "../Components/App/NetworkAlert";
 
 export default function AppLayout({
   children,
@@ -8,6 +9,9 @@ export default function AppLayout({
 }>) {
   return (
     <div className="flex min-h-screen bg-white">
+      {/* Network Alert Banner */}
+      <NetworkAlert />
+
       {/* Sidebar */}
       <Sidebar />
 
@@ -21,3 +25,4 @@ export default function AppLayout({
     </div>
   );
 }
+
