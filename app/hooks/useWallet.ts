@@ -3,6 +3,7 @@
 import { useAccount, useConnect, useDisconnect, useBalance, useSwitchChain, useChainId } from "wagmi";
 import { injected } from "wagmi/connectors";
 import { baseSepolia } from "wagmi/chains";
+import { formatUnits } from "viem";
 
 export function useWallet() {
     const { address, isConnected, isConnecting } = useAccount();
@@ -32,11 +33,16 @@ export function useWallet() {
         return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
     };
 
+    // Format balance from bigint
+    const formattedBalance = balance
+        ? formatUnits(balance.value, balance.decimals)
+        : undefined;
+
     return {
         address,
         isConnected,
         isConnecting,
-        balance: balance?.formatted,
+        balance: formattedBalance,
         balanceSymbol: balance?.symbol,
         connect: connectWallet,
         disconnect,
@@ -50,3 +56,4 @@ export function useWallet() {
         targetChainName,
     };
 }
+

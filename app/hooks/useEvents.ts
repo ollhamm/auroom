@@ -5,10 +5,14 @@ import { ADDRESSES, ABIS, PROTOCOL_CONFIG } from "@/app/contracts";
 import { useToast } from "@/app/providers/ToastProvider";
 import { formatUnits } from "viem";
 
-interface EventArgs {
-    user?: `0x${string}`;
-    amount?: bigint;
-    collateralSeized?: bigint;
+// Type for logs with args
+interface LogWithArgs {
+    args: {
+        user?: `0x${string}`;
+        amount?: bigint;
+        collateralSeized?: bigint;
+    };
+    transactionHash: `0x${string}`;
 }
 
 export function useProtocolEvents(userAddress?: `0x${string}`) {
@@ -20,10 +24,9 @@ export function useProtocolEvents(userAddress?: `0x${string}`) {
         abi: ABIS.AuRoomProtocol,
         eventName: "Deposited",
         onLogs(logs) {
-            logs.forEach((log) => {
-                const args = log.args as EventArgs;
-                if (args.user?.toLowerCase() === userAddress?.toLowerCase()) {
-                    const amount = formatUnits(args.amount || 0n, PROTOCOL_CONFIG.XAUT_DECIMALS);
+            (logs as unknown as LogWithArgs[]).forEach((log) => {
+                if (log.args.user?.toLowerCase() === userAddress?.toLowerCase()) {
+                    const amount = formatUnits(log.args.amount || 0n, PROTOCOL_CONFIG.XAUT_DECIMALS);
                     toast.success(
                         "Deposit Confirmed",
                         `${Number(amount).toFixed(4)} XAUT deposited`
@@ -40,10 +43,9 @@ export function useProtocolEvents(userAddress?: `0x${string}`) {
         abi: ABIS.AuRoomProtocol,
         eventName: "Borrowed",
         onLogs(logs) {
-            logs.forEach((log) => {
-                const args = log.args as EventArgs;
-                if (args.user?.toLowerCase() === userAddress?.toLowerCase()) {
-                    const amount = formatUnits(args.amount || 0n, PROTOCOL_CONFIG.IDRX_DECIMALS);
+            (logs as unknown as LogWithArgs[]).forEach((log) => {
+                if (log.args.user?.toLowerCase() === userAddress?.toLowerCase()) {
+                    const amount = formatUnits(log.args.amount || 0n, PROTOCOL_CONFIG.IDRX_DECIMALS);
                     toast.success(
                         "Borrow Confirmed",
                         `${Number(amount).toLocaleString()} IDRX borrowed`
@@ -60,10 +62,9 @@ export function useProtocolEvents(userAddress?: `0x${string}`) {
         abi: ABIS.AuRoomProtocol,
         eventName: "Repaid",
         onLogs(logs) {
-            logs.forEach((log) => {
-                const args = log.args as EventArgs;
-                if (args.user?.toLowerCase() === userAddress?.toLowerCase()) {
-                    const amount = formatUnits(args.amount || 0n, PROTOCOL_CONFIG.IDRX_DECIMALS);
+            (logs as unknown as LogWithArgs[]).forEach((log) => {
+                if (log.args.user?.toLowerCase() === userAddress?.toLowerCase()) {
+                    const amount = formatUnits(log.args.amount || 0n, PROTOCOL_CONFIG.IDRX_DECIMALS);
                     toast.success(
                         "Repayment Confirmed",
                         `${Number(amount).toLocaleString()} IDRX repaid`
@@ -80,10 +81,9 @@ export function useProtocolEvents(userAddress?: `0x${string}`) {
         abi: ABIS.AuRoomProtocol,
         eventName: "Withdrawn",
         onLogs(logs) {
-            logs.forEach((log) => {
-                const args = log.args as EventArgs;
-                if (args.user?.toLowerCase() === userAddress?.toLowerCase()) {
-                    const amount = formatUnits(args.amount || 0n, PROTOCOL_CONFIG.XAUT_DECIMALS);
+            (logs as unknown as LogWithArgs[]).forEach((log) => {
+                if (log.args.user?.toLowerCase() === userAddress?.toLowerCase()) {
+                    const amount = formatUnits(log.args.amount || 0n, PROTOCOL_CONFIG.XAUT_DECIMALS);
                     toast.success(
                         "Withdrawal Confirmed",
                         `${Number(amount).toFixed(4)} XAUT withdrawn`
@@ -100,10 +100,9 @@ export function useProtocolEvents(userAddress?: `0x${string}`) {
         abi: ABIS.AuRoomProtocol,
         eventName: "Liquidated",
         onLogs(logs) {
-            logs.forEach((log) => {
-                const args = log.args as EventArgs;
-                if (args.user?.toLowerCase() === userAddress?.toLowerCase()) {
-                    const amount = formatUnits(args.collateralSeized || 0n, PROTOCOL_CONFIG.XAUT_DECIMALS);
+            (logs as unknown as LogWithArgs[]).forEach((log) => {
+                if (log.args.user?.toLowerCase() === userAddress?.toLowerCase()) {
+                    const amount = formatUnits(log.args.collateralSeized || 0n, PROTOCOL_CONFIG.XAUT_DECIMALS);
                     toast.error(
                         "Position Liquidated",
                         `${Number(amount).toFixed(4)} XAUT collateral seized`
